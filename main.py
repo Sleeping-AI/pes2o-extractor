@@ -14,10 +14,8 @@ def extract_abstract(dataset, filter_source_value=None):
     else:
         num_entries = 50
 
-    checkpoint_interval = int(input("Enter the checkpoint interval: "))
-
     output_folder = input("Enter the checkpoint folder name: ")
-
+    
     while True:
         final_parquet_file_name = input("Enter the final Parquet file name (with .parquet extension): ")
         if final_parquet_file_name.lower().endswith('.parquet'):
@@ -29,12 +27,9 @@ def extract_abstract(dataset, filter_source_value=None):
 
     if filter_source_value:
         filtered_entries = [entry for entry in all_entries if entry['source'] == filter_source_value]
-        for i, entry in enumerate(filtered_entries):
-            print(f"Found and Extracted entry {i + 1}")
+        print(f"Found {len(filtered_entries)} entries matching the filter.")
     else:
         filtered_entries = all_entries
-        for i, entry in enumerate(filtered_entries):
-            print(f"Extracted entry {i + 1}")
 
     data = {key: [] for key in dataset.features.keys()}
     data['title'] = []
@@ -45,6 +40,8 @@ def extract_abstract(dataset, filter_source_value=None):
     checkpoint_counter = 0
     checkpoint_files = []
     total_entries_processed = 0
+    filtered_entries_processed = 0  # Counter for filtered entries
+    checkpoint_interval = 10000  # Hardcoded checkpoint interval
 
     for i, entry in enumerate(filtered_entries):
         text = entry['text']
@@ -56,7 +53,11 @@ def extract_abstract(dataset, filter_source_value=None):
 
         total_entries_processed += 1
 
-        if total_entries_processed % checkpoint_interval == 0:
+        if entry['source'] == filter_source_value:
+            filtered_entries_processed += 1
+        
+        # Checkpoint after every 10K filtered entries
+        if filtered_entries_processed >= checkpoint_interval:
             checkpoint_counter += 1
             df = pd.DataFrame(data)
             columns = ['title', 'text'] + [key for key in dataset.features.keys() if key not in ['title', 'text']]
@@ -69,17 +70,19 @@ def extract_abstract(dataset, filter_source_value=None):
             checkpoint_files.append(checkpoint_file_path)
             print(f"Checkpoint {checkpoint_counter} saved to {checkpoint_file_path}")
 
+            # Reset the data for the next checkpoint
             data = {key: [] for key in dataset.features.keys()}
             data['title'] = []
+            filtered_entries_processed = 0  # Reset the filtered entries counter
 
-    if total_entries_processed % checkpoint_interval != 0:
+    # Handle remaining entries if they haven't reached 10K
+    if filtered_entries_processed > 0:
         df = pd.DataFrame(data)
         columns = ['title', 'text'] + [key for key in dataset.features.keys() if key not in ['title', 'text']]
         df = df[columns]
 
-        table = pa.Table.from_pandas(df)
         final_checkpoint_file_path = os.path.join(output_folder, "final_checkpoint.parquet")
-        pq.write_table(table, final_checkpoint_file_path)
+        pq.write_table(pa.Table.from_pandas(df), final_checkpoint_file_path)
 
         checkpoint_files.append(final_checkpoint_file_path)
         print(f"Final checkpoint saved to {final_checkpoint_file_path}")
